@@ -2,7 +2,8 @@ import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QGraphicsView, QGraphicsScene,
     QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QLabel,
-    QGraphicsRectItem, QGraphicsTextItem, QGraphicsEllipseItem, QGraphicsLineItem
+    QGraphicsRectItem, QGraphicsTextItem, QGraphicsEllipseItem, QGraphicsLineItem,
+    QMenu
 )
 from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
 from PySide6.QtCore import Qt, QPointF, QLineF, QTimer, QRectF
@@ -239,6 +240,101 @@ class Block(QGraphicsRectItem):
         super().hoverLeaveEvent(event)
 
 
+class PerceptronBlock(QGraphicsEllipseItem):
+    def __init__(self, title="Perceptron", num_inputs=1, num_outputs=1):
+        super().__init__(0, 0, 100, 100)  # Круглый блок
+        self.setBrush(QBrush(QColor(255, 200, 200)))
+        self.setPen(QPen(Qt.black, 2))
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable)
+        self.setFlag(QGraphicsEllipseItem.ItemIsSelectable)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges)
+        self.setCursor(Qt.PointingHandCursor)
+
+        self.title = QGraphicsTextItem(title, self)
+        self.title.setPos(25, 40)  # Центрируем текст
+        self.block_type = "perceptron"
+
+        self.input_connectors = []
+        self.output_connectors = []
+
+        # Настраиваемое количество входов/выходов
+        self.num_inputs = num_inputs
+        self.num_outputs = num_outputs
+
+        self.setup_connectors()
+
+    def setup_connectors(self):
+        # Удаляем старые коннекторы (если были)
+        for conn in self.input_connectors + self.output_connectors:
+            if conn.scene():
+                conn.scene().removeItem(conn)
+
+        self.input_connectors = []
+        self.output_connectors = []
+
+        # Распределяем входы по левой стороне
+        input_step = 100 / (self.num_inputs + 1)
+        for i in range(self.num_inputs):
+            y = (i + 1) * input_step
+            self.input_connectors.append(Connector(0, y, self, is_output=False))
+
+        # Распределяем выходы по правой стороне
+        output_step = 100 / (self.num_outputs + 1)
+        for i in range(self.num_outputs):
+            y = (i + 1) * output_step
+            self.output_connectors.append(Connector(100, y, self, is_output=True))
+
+    def paint(self, painter, option, widget=None):
+        # Рисуем круг (переопределяем стандартный прямоугольник)
+        if self.isSelected():
+            painter.setPen(QPen(Qt.red, 3))
+        else:
+            painter.setPen(QPen(Qt.black, 2))
+        painter.setBrush(self.brush())
+        painter.drawEllipse(self.rect())
+
+    def itemChange(self, change, value):
+        if change == QGraphicsEllipseItem.ItemPositionHasChanged:
+            for connector in self.input_connectors + self.output_connectors:
+                connector.update_connections()
+        return super().itemChange(change, value)
+
+    def delete_block(self):
+        # Удаляем все соединения
+        all_connections = []
+        for connector in self.input_connectors + self.output_connectors:
+            all_connections.extend(connector.connections.copy())
+        for connection in all_connections:
+            connection.delete_connection()
+
+        # Удаляем сам блок
+        if self.scene():
+            self.scene().removeItem(self)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu()
+
+        # Добавляем опции изменения числа входов/выходов
+        add_input = menu.addAction("+ Вход")
+        remove_input = menu.addAction("- Вход")
+        add_output = menu.addAction("+ Выход")
+        remove_output = menu.addAction("- Выход")
+
+        action = menu.exec(event.screenPos())
+
+        if action == add_input:
+            self.num_inputs += 1
+            self.setup_connectors()
+        elif action == remove_input and self.num_inputs > 1:
+            self.num_inputs -= 1
+            self.setup_connectors()
+        elif action == add_output:
+            self.num_outputs += 1
+            self.setup_connectors()
+        elif action == remove_output and self.num_outputs > 1:
+            self.num_outputs -= 1
+            self.setup_connectors()
+
 class BlockEditor(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -258,6 +354,7 @@ class BlockEditor(QMainWindow):
         self.btn_add_camera = QPushButton("Add Camera")
         self.btn_add_grayscale = QPushButton("Add Grayscale")
         self.btn_add_display = QPushButton("Add Display")
+        self.btn_add_perceptron = QPushButton("Add Perceptron")
         self.btn_run = QPushButton("Run Pipeline")
         self.btn_clear = QPushButton("Clear All")
 
@@ -265,6 +362,7 @@ class BlockEditor(QMainWindow):
         self.tool_layout.addWidget(self.btn_add_camera)
         self.tool_layout.addWidget(self.btn_add_grayscale)
         self.tool_layout.addWidget(self.btn_add_display)
+        self.tool_layout.addWidget(self.btn_add_perceptron)
         self.tool_layout.addStretch()
         self.tool_layout.addWidget(self.btn_run)
         self.tool_layout.addWidget(self.btn_clear)
@@ -283,6 +381,7 @@ class BlockEditor(QMainWindow):
         self.btn_add_camera.clicked.connect(self.add_camera_block)
         self.btn_add_grayscale.clicked.connect(self.add_grayscale_block)
         self.btn_add_display.clicked.connect(self.add_display_block)
+        self.btn_add_perceptron.clicked.connect(self.add_perceptron_block)
         self.btn_run.clicked.connect(self.execute_pipeline)
         self.btn_clear.clicked.connect(self.clear_scene)
 
@@ -316,6 +415,13 @@ class BlockEditor(QMainWindow):
         self.scene.addItem(block)
         self.blocks.append(block)
         self.statusBar().showMessage("Added Display Block", 2000)
+
+    def add_perceptron_block(self):
+        block = PerceptronBlock("Perceptron", num_inputs=2, num_outputs=1)
+        block.setPos(200, 200)
+        self.scene.addItem(block)
+        self.blocks.append(block)
+        self.statusBar().showMessage("Added Perceptron Block", 2000)
 
     def clear_scene(self):
         self.scene.clear()
@@ -372,7 +478,7 @@ class BlockEditor(QMainWindow):
         selected_items = self.scene.selectedItems()
 
         for item in selected_items:
-            if isinstance(item, Block):
+            if isinstance(item, (Block, PerceptronBlock)):
                 item.delete_block()
                 if item in self.blocks:
                     self.blocks.remove(item)
